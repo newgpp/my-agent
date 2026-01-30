@@ -1,0 +1,19 @@
+{
+  "servers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "${FS_ALLOWED_DIR_1}",
+        "${FS_ALLOWED_DIR_2}"
+      ]
+    },
+    "tavily": {
+      "command": "python3.12",
+      "args": [
+        "servers/tavily_mcp_server.py"
+      ]
+    }
+  }
+}

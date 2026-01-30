@@ -1,0 +1,17 @@
+# 基础 Web 框架
+fastapi==0.115.0
+uvicorn[standard]==0.31.0
+
+# MCP 核心协议 (Python SDK)
+mcp==1.2.0
+
+# 异步请求与工具
+httpx==0.27.2
+python-dotenv==1.0.1
+loguru==0.7.2
+
+# 外部 Agent 工具 (搜索等)
+tavily-python==0.5.0
+
+# 如果你要调用 DeepSeek/OpenAI 接口
+openai==1.51.0

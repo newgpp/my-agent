@@ -1,0 +1,42 @@
+import json
+import os
+from dataclasses import dataclass
+from typing import Dict, List, Optional
+
+from loguru import logger
+
+@dataclass(frozen=True)
+class MCPServerConfig:
+    name: str
+    command: str
+    args: List[str]
+    env: Optional[Dict[str, str]] = None
+
+
+def _expand_env(value: str) -> str:
+    """Expand environment variables in a string."""
+    return os.path.expandvars(value)
+
+
+def _is_resolved(value: str) -> bool:
+    return "${" not in value and value.strip() != ""
+
+
+def load_mcp_servers(config_path: str) -> Dict[str, MCPServerConfig]:
+    """Load MCP server configs from JSON file."""
+    logger.info("Loading MCP servers from {}", config_path)
+    with open(config_path, "r", encoding="utf-8") as f:
+        raw = json.load(f)
+
+    servers = raw.get("servers", {})
+    result: Dict[str, MCPServerConfig] = {}
+    for name, cfg in servers.items():
+        command = _expand_env(cfg["command"])
+        expanded_args = [_expand_env(arg) for arg in cfg.get("args", [])]
+        args = [arg for arg in expanded_args if _is_resolved(arg)]
+        env = cfg.get("env")
+        if env:
+            env = {k: _expand_env(v) for k, v in env.items()}
+        result[name] = MCPServerConfig(name=name, command=command, args=args, env=env)
+        logger.info("Registered MCP server {}", name)
+    return result
