@@ -4,8 +4,10 @@ from typing import Any, Dict, Optional
 from loguru import logger
 from tavily import TavilyClient
 from mcp.server.fastmcp import FastMCP
+from dotenv import load_dotenv
 
 mcp = FastMCP("tavily")
+load_dotenv()
 
 
 def _get_client() -> TavilyClient:

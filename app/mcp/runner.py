@@ -1,5 +1,6 @@
-import os
 from datetime import timedelta
+import os
+import json
 from pathlib import Path
 from contextlib import AsyncExitStack
 from typing import Any, Dict, List
@@ -8,6 +9,7 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.session import ClientSession
 import mcp.types as types
 
+from app.config import get_settings
 from app.mcp.registry import MCPServerConfig, load_mcp_servers
 from loguru import logger
 
@@ -40,22 +42,14 @@ class MCPClientSession(ClientSession):
 
 
 class MCPRunner:
-    def __init__(self, config_path: str = "mcp_servers.json") -> None:
+    def __init__(self, config_path: str | None = None) -> None:
         """Create MCP runner for configured servers."""
-        self._config_path = config_path
+        settings = get_settings()
+        self._config_path = config_path or settings.mcp_config_path
         self._servers: Dict[str, MCPServerConfig] = {}
         self._sessions: Dict[str, ClientSession] = {}
         self._stack = AsyncExitStack()
-        self._roots = self._load_roots()
-
-    @staticmethod
-    def _load_roots() -> List[str]:
-        roots = []
-        for key in ("FS_ALLOWED_DIR_1", "FS_ALLOWED_DIR_2"):
-            value = os.getenv(key)
-            if value:
-                roots.append(value)
-        return roots
+        self._roots = settings.fs_roots()
 
     async def start(self) -> None:
         """Start all MCP servers and initialize sessions."""
@@ -92,5 +86,26 @@ class MCPRunner:
         if server_name not in self._sessions:
             raise RuntimeError(f"MCP server not started: {server_name}")
         session = self._sessions[server_name]
-        logger.info("Calling tool {} on {}", tool_name, server_name)
-        return await session.call_tool(tool_name, arguments)
+        logger.info(
+            "MCP input tool={} server={} args={}",
+            tool_name,
+            server_name,
+            json.dumps(arguments, ensure_ascii=False, default=str),
+        )
+        result = await session.call_tool(tool_name, arguments)
+        if hasattr(result, "model_dump"):
+            payload = result.model_dump(mode="json", by_alias=True, exclude_none=True)
+        elif hasattr(result, "content"):
+            payload = {
+                "content": getattr(result, "content", None),
+                "is_error": getattr(result, "is_error", None),
+            }
+        else:
+            payload = result
+        logger.info(
+            "MCP output tool={} server={} result={}",
+            tool_name,
+            server_name,
+            json.dumps(payload, ensure_ascii=False, default=str),
+        )
+        return result

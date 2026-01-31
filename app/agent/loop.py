@@ -3,34 +3,38 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 from loguru import logger
 
+from app.agent.schemas import (
+    ChatCompletionChunk,
+    ChatCompletionResponse,
+    ChatMessage,
+    ToolCall,
+)
+from app.config import get_settings
 from app.llm.deepseek_client import DeepSeekClient
 from app.mcp.runner import MCPRunner
 from app.mcp.tool_adapter import build_openai_tools, tool_result_to_text
 
 
-def _get_tool_calls(response: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _get_tool_calls(response: Dict[str, Any]) -> List[ToolCall]:
     """Extract tool calls from a chat completion response."""
-    choices = response.get("choices") or []
-    if not choices:
+    parsed = ChatCompletionResponse.model_validate(response)
+    if not parsed.choices:
         return []
-    message = choices[0].get("message") or {}
-    tool_calls = message.get("tool_calls") or []
-    return tool_calls
+    return parsed.choices[0].message.tool_calls or []
 
 
-def _assistant_message_from_response(response: Dict[str, Any]) -> Dict[str, Any]:
+def _assistant_message_from_response(response: Dict[str, Any]) -> ChatMessage:
     """Extract the assistant message from a chat completion response."""
-    choices = response.get("choices") or []
-    if not choices:
-        return {"role": "assistant", "content": ""}
-    message = choices[0].get("message") or {}
-    return message
+    parsed = ChatCompletionResponse.model_validate(response)
+    if not parsed.choices:
+        return ChatMessage(role="assistant", content="")
+    return parsed.choices[0].message
 
 
-def _parse_tool_args(tool_call: Dict[str, Any]) -> Dict[str, Any]:
+def _parse_tool_args(tool_call: ToolCall) -> Dict[str, Any]:
     """Parse tool call arguments into a dict."""
-    fn = tool_call.get("function") or {}
-    raw_args = fn.get("arguments") or "{}"
+    fn = tool_call.function
+    raw_args = fn.arguments if fn else "{}"
     if isinstance(raw_args, dict):
         return raw_args
     try:
@@ -54,15 +58,15 @@ def _select_tool_choice(user_message: str, tool_names: List[str]) -> Optional[Di
 
 
 async def _run_tools(
-    tool_calls: List[Dict[str, Any]],
+    tool_calls: List[ToolCall],
     runner: MCPRunner,
     tool_name_to_server: Dict[str, str],
-) -> List[Dict[str, Any]]:
+) -> List[ChatMessage]:
     """Execute tool calls and return tool role messages."""
-    tool_messages: List[Dict[str, Any]] = []
+    tool_messages: List[ChatMessage] = []
     for call in tool_calls:
-        fn = call.get("function") or {}
-        tool_name = fn.get("name")
+        fn = call.function
+        tool_name = fn.name if fn else None
         if not tool_name:
             continue
         server = tool_name_to_server.get(tool_name)
@@ -72,13 +76,17 @@ async def _run_tools(
         logger.info("Executing tool {} on {}", tool_name, server)
         result = await runner.call_tool(server, tool_name, args)
         tool_messages.append(
-            {
-                "role": "tool",
-                "tool_call_id": call.get("id"),
-                "content": tool_result_to_text(result),
-            }
+            ChatMessage(
+                role="tool",
+                tool_call_id=call.id,
+                content=tool_result_to_text(result),
+            )
         )
     return tool_messages
+
+
+def _dump_messages(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
+    return [message.model_dump(exclude_none=True) for message in messages]
 
 
 async def build_final_messages(
@@ -86,18 +94,31 @@ async def build_final_messages(
     runner: MCPRunner,
     client: DeepSeekClient,
     max_rounds: int = 5,
-) -> List[Dict[str, Any]]:
+) -> List[ChatMessage]:
     """Run tool-calling loop and return final messages for streaming."""
     tools_by_server = await runner.list_tools()
     tools, tool_name_to_server = build_openai_tools(tools_by_server)
     tool_choice = _select_tool_choice(user_message, list(tool_name_to_server.keys()))
 
-    messages: List[Dict[str, Any]] = [{"role": "user", "content": user_message}]
+    messages: List[ChatMessage] = []
+    roots = get_settings().fs_roots()
+    if roots:
+        messages.append(
+            ChatMessage(
+                role="system",
+                content=(
+                    "Filesystem tools can only access these allowed directories. "
+                    "Use absolute paths and prefer these roots when calling file tools:\n"
+                    + "\n".join(roots)
+                ),
+            )
+        )
+    messages.append(ChatMessage(role="user", content=user_message))
 
     for i in range(max_rounds):
         logger.info("Tool loop round {}", len(messages))
         choice = tool_choice if i == 0 else "auto"
-        response = await client.chat(messages, tools=tools, tool_choice=choice)
+        response = await client.chat(_dump_messages(messages), tools=tools, tool_choice=choice)
         tool_calls = _get_tool_calls(response)
         if not tool_calls:
             return messages
@@ -111,15 +132,14 @@ async def build_final_messages(
 
 
 async def stream_final_answer(
-    messages: List[Dict[str, Any]],
+    messages: List[ChatMessage],
     client: DeepSeekClient,
 ) -> AsyncIterator[str]:
     """Stream only the final answer tokens."""
-    async for chunk in client.stream_chat(messages):
-        choices = chunk.get("choices") or []
-        if not choices:
+    async for chunk in client.stream_chat(_dump_messages(messages)):
+        parsed = ChatCompletionChunk.model_validate(chunk)
+        if not parsed.choices:
             continue
-        delta = choices[0].get("delta") or {}
-        text = delta.get("content")
+        text = parsed.choices[0].delta.content
         if text:
             yield text

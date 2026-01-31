@@ -3,26 +3,27 @@ from typing import Any, Dict, List, Tuple
 
 from loguru import logger
 
+from app.mcp.schemas import MCPTool, OpenAIFunction, OpenAITool, ToolResultContent
+
 def _tool_to_openai(tool: Any, server_name: str) -> Dict[str, Any]:
     """Convert an MCP tool to OpenAI tools format."""
-    if isinstance(tool, dict):
-        name = tool.get("name")
-        description = tool.get("description")
-        parameters = tool.get("inputSchema") or {}
-    else:
-        name = getattr(tool, "name", None)
-        description = getattr(tool, "description", None)
-        parameters = getattr(tool, "inputSchema", None) or {}
+    mcp_tool = (
+        MCPTool.model_validate(tool)
+        if isinstance(tool, dict)
+        else MCPTool.model_validate(
+            {"name": getattr(tool, "name", None), "description": getattr(tool, "description", None), "inputSchema": getattr(tool, "inputSchema", None) or {}}
+        )
+    )
 
-    return {
-        "type": "function",
-        "function": {
-            "name": name,
-            "description": description,
-            "parameters": parameters,
-        },
-        "x-mcp-server": server_name,
-    }
+    oa_tool = OpenAITool(
+        function=OpenAIFunction(
+            name=mcp_tool.name,
+            description=mcp_tool.description,
+            parameters=mcp_tool.input_schema,
+        ),
+        x_mcp_server=server_name,
+    )
+    return oa_tool.model_dump(by_alias=True, exclude_none=True)
 
 
 def build_openai_tools(
@@ -49,12 +50,11 @@ def tool_result_to_text(result: Any) -> str:
     if hasattr(result, "model_dump"):
         return json.dumps(result.model_dump(mode="json", by_alias=True, exclude_none=True), ensure_ascii=False)
     if isinstance(result, dict) and "content" in result:
-        return json.dumps(result, ensure_ascii=False)
+        return json.dumps(ToolResultContent.model_validate(result).model_dump(exclude_none=True), ensure_ascii=False)
     if hasattr(result, "content"):
-        payload = {
-            "content": result.content,
-        }
-        if hasattr(result, "is_error"):
-            payload["is_error"] = result.is_error
-        return json.dumps(payload, ensure_ascii=False)
+        payload = ToolResultContent(
+            content=getattr(result, "content", None),
+            is_error=getattr(result, "is_error", None),
+        )
+        return json.dumps(payload.model_dump(exclude_none=True), ensure_ascii=False)
     return json.dumps(result, ensure_ascii=False)

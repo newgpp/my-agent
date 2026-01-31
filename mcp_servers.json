@@ -10,7 +10,7 @@
       ]
     },
     "tavily": {
-      "command": "python3.12",
+      "command": ".venv/bin/python",
       "args": [
         "servers/tavily_mcp_server.py"
       ]

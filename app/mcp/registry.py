@@ -1,16 +1,19 @@
 import json
 import os
-from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from loguru import logger
+from pydantic import BaseModel, Field
 
-@dataclass(frozen=True)
-class MCPServerConfig:
-    name: str
+class MCPServerConfig(BaseModel):
+    name: Optional[str] = None
     command: str
-    args: List[str]
+    args: List[str] = Field(default_factory=list)
     env: Optional[Dict[str, str]] = None
+
+
+class MCPServersFile(BaseModel):
+    servers: Dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
 def _expand_env(value: str) -> str:
@@ -28,13 +31,14 @@ def load_mcp_servers(config_path: str) -> Dict[str, MCPServerConfig]:
     with open(config_path, "r", encoding="utf-8") as f:
         raw = json.load(f)
 
-    servers = raw.get("servers", {})
+    parsed = MCPServersFile.model_validate(raw)
+    servers = parsed.servers
     result: Dict[str, MCPServerConfig] = {}
     for name, cfg in servers.items():
-        command = _expand_env(cfg["command"])
-        expanded_args = [_expand_env(arg) for arg in cfg.get("args", [])]
+        command = _expand_env(cfg.command)
+        expanded_args = [_expand_env(arg) for arg in cfg.args]
         args = [arg for arg in expanded_args if _is_resolved(arg)]
-        env = cfg.get("env")
+        env = cfg.env
         if env:
             env = {k: _expand_env(v) for k, v in env.items()}
         result[name] = MCPServerConfig(name=name, command=command, args=args, env=env)

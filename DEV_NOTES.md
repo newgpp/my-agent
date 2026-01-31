@@ -8,7 +8,7 @@
 - Web: FastAPI + SSE（`text/event-stream`）
 - LLM: DeepSeek-V3.2（OpenAI 风格 `/chat/completions`；支持 `stream: true`，以 `data: [DONE]` 结束）  
 - MCP:
-  - Filesystem MCP Server：用 `npx -y @modelcontextprotocol/server-filesystem <allowed_dir...>` 跑（只允许操作传入目录）  
+  - Filesystem MCP Server：用 `npx -y @modelcontextprotocol/server-filesystem <allowed_dir...>` 跑（只允许操作传入目录，首次运行需要联网拉包）  
   - Tavily：今天用 “自建 Tavily MCP Server（Python）” 包一层，保持 MCP 一致性（后续可替换为社区 Tavily MCP）
 
 参考：
@@ -46,21 +46,33 @@ curl -G -N --data-urlencode "message=用tavily搜索旧金山今天天气" "http
 ### 2.1 Python 依赖
 
 ```bash
-cd mcp-work-assistant
+cd my-agent
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 pip install -r requirements.txt
+```
+
+### 2.2 启动
+
+```bash
+# 方式一：python 启动（读取 .env）
+python -m app.main
+
+# 方式二：uvicorn（推荐；便于看日志）
+.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
 
 ---
 
-## 今日收尾（2026-01-30）
+## 今日收尾（2026-01-31）
 
 已完成：
 - FastAPI SSE 接口可用，事件契约满足 `token/ping/error/done`
 - MCP filesystem + tavily 服务可用，MCP roots 正确下发
 - DeepSeek 非流式工具调用 + 最终流式输出闭环跑通
 - 处理了工具结果序列化、Uvicorn 事件与 URL 编码问题
+- LLM / MCP 输入输出日志已打印
 
 已验证（通过 URL 编码调用）：
 - `GET /v1/chat/sse?message=列出Downloads前10个文件`
