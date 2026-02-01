@@ -7,6 +7,7 @@
 - MCP Python SDK
 - filesystem MCP server via npx @modelcontextprotocol/server-filesystem
 - tavily MCP server (local python) that exposes a tool "tavily_search"
+- SQLAlchemy
 
 ## SSE contract
 - event: token  data: {"text": "..."}

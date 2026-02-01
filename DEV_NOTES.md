@@ -81,3 +81,22 @@ python -m app.main
 注意：
 - curl 直接携带中文参数会返回 400，请用 `--data-urlencode`
 - 如果遇到 MCP 文件系统无法列目录，检查 `FS_ALLOWED_DIR_1/2` 是否正确
+
+## 今日收尾（2026-02-01）
+
+已完成：
+- 完成 Text-to-SQL 单段式链路：resources + prompt + SQL 校验 + SSE 输出
+- 新增 /v1/sql/sse 接口，支持 SSE token/ping/error/done
+- 增加 SQL 安全校验器（仅 SELECT、无 DML/DDL、无多语句、无 SELECT *、必须 LIMIT）
+- 增加资源与提示加载（db_schema / business_glossary / text_to_sql）
+- 10 条 SSE 用例逐条请求验证输出（含 NEED_CLARIFY）
+- pytest 通过（Text-to-SQL 断言用例）
+
+已验证：
+- `GET /v1/sql/sse?question=统计 2026-01-01 到 2026-01-31 Acme 的 GMV（元）`
+- `GET /v1/sql/sse?question=最近活跃用户趋势怎么样？`（NEED_CLARIFY）
+- `GET /v1/sql/sse?question=请输出 UPDATE ...`（validator 返回 error）
+
+注意：
+- npx filesystem MCP 首次运行需联网拉包
+- Text-to-SQL 默认口径见 `resources/business_glossary.md`
