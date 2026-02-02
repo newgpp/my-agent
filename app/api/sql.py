@@ -5,10 +5,8 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
+from app.agent.routes import get_sql_route_context
 from app.llm.deepseek_client import DeepSeekClient
-from app.prompts.loader import load_prompt
-from app.resources.provider import get_resource
-from app.sql.messages import build_text_to_sql_messages
 from app.sql.validator import validate_sql, contains_forbidden_keyword
 
 router = APIRouter()
@@ -26,23 +24,24 @@ def get_client() -> DeepSeekClient:
 
 @router.get("/v1/sql/sse")
 async def sql_sse(
-    question: str = Query(...),
+    message: str = Query(...),
     client: DeepSeekClient = Depends(get_client),
 ) -> StreamingResponse:
     """SSE endpoint for text-to-sql generation."""
     async def event_stream() -> AsyncIterator[str]:
         try:
-            logger.info("SQL SSE request received question_len={}", len(question))
-            if contains_forbidden_keyword(question):
-                ok, reason = validate_sql(question)
+            logger.info("SQL SSE request received message_len={}", len(message))
+            if contains_forbidden_keyword(message):
+                ok, reason = validate_sql(message)
                 if not ok:
                     yield _sse_event("error", {"text": f"ERROR: {reason}"})
                     yield _sse_event("done", {})
                     return
-            db_schema = get_resource("context://db_schema")
-            glossary = get_resource("context://business_glossary")
-            prompt = load_prompt("text_to_sql")
-            messages = build_text_to_sql_messages(question, db_schema, glossary, prompt)
+            route_context = get_sql_route_context()
+            messages = [{"role": "system", "content": route_context.system_prompt}]
+            for extra in route_context.extra_system_messages:
+                messages.append({"role": "system", "content": extra})
+            messages.append({"role": "user", "content": message})
 
             response = await client.chat(messages)
             choices = response.get("choices") or []

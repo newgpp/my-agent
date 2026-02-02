@@ -10,7 +10,11 @@
       ]
     },
     "tavily": {
-      "command": ".venv/bin/python",
+      "command": "python",
+      "env": {
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8"
+      },
       "args": [
         "servers/tavily_mcp_server.py"
       ]

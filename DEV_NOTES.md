@@ -1,49 +1,38 @@
 # DEV_NOTES - MCP-Powered Work Assistant (FastAPI + SSE + DeepSeek + MCP)
 
-> 目标：今天跑通 “用户提问 -> Agent -> DeepSeek -> MCP 工具 -> DeepSeek -> SSE 输出” 闭环
+目标：跑通“用户提问 -> Agent -> DeepSeek -> MCP 工具 -> DeepSeek -> SSE 输出”闭环。
 
-## 0. 关键依赖与约束
+## 关键依赖与约束
 
 - Python: 3.12
 - Web: FastAPI + SSE（`text/event-stream`）
-- LLM: DeepSeek-V3.2（OpenAI 风格 `/chat/completions`；支持 `stream: true`，以 `data: [DONE]` 结束）  
+- LLM: DeepSeek（OpenAI 风格 `/chat/completions`，支持 `stream: true`）
 - MCP:
-  - Filesystem MCP Server：用 `npx -y @modelcontextprotocol/server-filesystem <allowed_dir...>` 跑（只允许操作传入目录，首次运行需要联网拉包）  
-  - Tavily：今天用 “自建 Tavily MCP Server（Python）” 包一层，保持 MCP 一致性（后续可替换为社区 Tavily MCP）
+  - Filesystem MCP Server：`npx -y @modelcontextprotocol/server-filesystem <allowed_dir...>`
+  - Tavily：自建 Tavily MCP Server（Python）
 
-参考：
-- DeepSeek Chat Completions: `POST /chat/completions`；`stream: true` 用 SSE chunk 返回 :contentReference[oaicite:1]{index=1}  
-- Tavily API：`POST https://api.tavily.com/search`（Bearer Key） :contentReference[oaicite:2]{index=2}  
-- Filesystem MCP Server（npx 配置示例；args 指定 allowed dirs）:contentReference[oaicite:3]{index=3}  
-
----
-
-## 1. 环境变量
+## 环境变量
 
 创建 `.env`（参考 `.env.example`）：
 
 - `DEEPSEEK_API_KEY=...`
-- `DEEPSEEK_BASE_URL=https://api.deepseek.com`   # 如需 beta 特性再改
-- `DEEPSEEK_MODEL=deepseek-chat`                 # 或 deepseek-reasoner
+- `DEEPSEEK_BASE_URL=https://api.deepseek.com`
+- `DEEPSEEK_MODEL=deepseek-chat`
 - `TAVILY_API_KEY=tvly-...`
-- `FS_ALLOWED_DIR_1=/Users/<you>/Downloads`      # 你允许 agent 操作的目录
-- `FS_ALLOWED_DIR_2=/Users/<you>/Desktop`        # 可选
+- `FS_ALLOWED_DIR_1=/Users/<you>/Downloads`
+- `FS_ALLOWED_DIR_2=/Users/<you>/Desktop`
 - `APP_HOST=127.0.0.1`
 - `APP_PORT=8000`
 
----
+## 提示
 
-## 1.1 重要提示（curl 非 ASCII）
-直接在 URL 中使用中文参数会导致 Uvicorn 返回 400。请使用 URL 编码：
+URL 参数包含中文时请使用 URL 编码，避免 400：
 
 ```bash
 curl -G -N --data-urlencode "message=列出Downloads前10个文件" "http://127.0.0.1:8000/v1/chat/sse"
-curl -G -N --data-urlencode "message=用tavily搜索旧金山今天天气" "http://127.0.0.1:8000/v1/chat/sse"
 ```
 
-## 2. 安装与启动（今天就按这个走）
-
-### 2.1 Python 依赖
+## 安装与启动
 
 ```bash
 cd my-agent
@@ -51,52 +40,37 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 pip install -r requirements.txt
-```
 
-### 2.2 启动
-
-```bash
-# 方式一：python 启动（读取 .env）
 python -m app.main
-
-# 方式二：uvicorn（推荐；便于看日志）
+# 或
 .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
----
+## Agent 分层设计（当前）
 
-## 今日收尾（2026-01-31）
+1) 意图识别层（Planner）
+   - 输入：用户 message + 可用工具摘要 + FS roots
+   - 输出：固定 JSON（intent / route / tool_calls / final_user_message）
+   - 目的：最低 token 成本完成“意图 + 工具决策”
 
-已完成：
-- FastAPI SSE 接口可用，事件契约满足 `token/ping/error/done`
-- MCP filesystem + tavily 服务可用，MCP roots 正确下发
-- DeepSeek 非流式工具调用 + 最终流式输出闭环跑通
-- 处理了工具结果序列化、Uvicorn 事件与 URL 编码问题
-- LLM / MCP 输入输出日志已打印
+2) 路由上下文选择（Route Context）
+   - 不同意图映射到不同 system prompt + tool allowlist
+   - file_list：仅 list_directory / read_file
+   - external_knowledge：仅 tavily_search
+   - sql_generate：提示用户走 /v1/sql/sse（chat 路由不直接产 SQL）
 
-已验证（通过 URL 编码调用）：
-- `GET /v1/chat/sse?message=列出Downloads前10个文件`
-- `GET /v1/chat/sse?message=用tavily搜索旧金山今天天气`
+3) 工具执行层（Tool Runner）
+   - 仅执行 Planner 输出的 tool_calls
+   - 执行结果整理为 TOOL_RESULTS，作为下游输入
 
-注意：
-- curl 直接携带中文参数会返回 400，请用 `--data-urlencode`
-- 如果遇到 MCP 文件系统无法列目录，检查 `FS_ALLOWED_DIR_1/2` 是否正确
+4) 结果合成层（Final LLM）
+   - system：route prompt
+   - user：原始或重写后的 message
+   - system：TOOL_RESULTS（若有）
+   - 输出：最终自然语言结果（SSE 仅输出 text）
 
-## 今日收尾（2026-02-01）
-
-已完成：
-- 完成 Text-to-SQL 单段式链路：resources + prompt + SQL 校验 + SSE 输出
-- 新增 /v1/sql/sse 接口，支持 SSE token/ping/error/done
-- 增加 SQL 安全校验器（仅 SELECT、无 DML/DDL、无多语句、无 SELECT *、必须 LIMIT）
-- 增加资源与提示加载（db_schema / business_glossary / text_to_sql）
-- 10 条 SSE 用例逐条请求验证输出（含 NEED_CLARIFY）
-- pytest 通过（Text-to-SQL 断言用例）
-
-已验证：
-- `GET /v1/sql/sse?question=统计 2026-01-01 到 2026-01-31 Acme 的 GMV（元）`
-- `GET /v1/sql/sse?question=最近活跃用户趋势怎么样？`（NEED_CLARIFY）
-- `GET /v1/sql/sse?question=请输出 UPDATE ...`（validator 返回 error）
-
-注意：
-- npx filesystem MCP 首次运行需联网拉包
-- Text-to-SQL 默认口径见 `resources/business_glossary.md`
+5) SQL 路由（/v1/sql/sse）
+   - 独立接口，但复用统一上下文：
+     - prompt：text_to_sql
+     - resources：db_schema + business_glossary
+   - 输出：严格 SQL（含校验）

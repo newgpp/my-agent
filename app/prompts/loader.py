@@ -4,7 +4,11 @@ from pathlib import Path
 
 
 _PROMPT_MAP = {
+    "chat_planner": "prompts/chat_planner.md",
+    "route_external_knowledge": "prompts/route_external_knowledge.md",
+    "route_file_list": "prompts/route_file_list.md",
     "text_to_sql": "prompts/text_to_sql.md",
+    "route_sql_generate": "prompts/route_sql_generate.md",
 }
 
 
