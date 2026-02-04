@@ -46,6 +46,8 @@ def load_mcp_servers(config_path: str) -> Dict[str, MCPServerConfig]:
     """Load MCP server configs from JSON file."""
     # Ensure .env is loaded so ${FS_ALLOWED_DIR_*} expands correctly.
     load_dotenv()
+    disabled_raw = os.getenv("MCP_DISABLED_SERVERS", "")
+    disabled = {name.strip() for name in disabled_raw.split(",") if name.strip()}
     logger.info("Loading MCP servers from {}", config_path)
     with open(config_path, "r", encoding="utf-8") as f:
         raw = json.load(f)
@@ -54,6 +56,9 @@ def load_mcp_servers(config_path: str) -> Dict[str, MCPServerConfig]:
     servers = parsed.servers
     result: Dict[str, MCPServerConfig] = {}
     for name, cfg in servers.items():
+        if name in disabled:
+            logger.info("Skipping MCP server {} (disabled)", name)
+            continue
         command = _resolve_command(_expand_env(cfg.command))
         expanded_args = [_expand_env(arg) for arg in cfg.args]
         args = [arg for arg in expanded_args if _is_resolved(arg)]

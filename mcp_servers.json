@@ -18,6 +18,16 @@
       "args": [
         "servers/tavily_mcp_server.py"
       ]
+    },
+    "ledger": {
+      "command": ".venv/bin/python",
+      "env": {
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8"
+      },
+      "args": [
+        "servers/ledger_mcp_server.py"
+      ]
     }
   }
 }

@@ -29,6 +29,13 @@ def get_route_context(route: str) -> RouteContext:
             tool_allowlist=frozenset(),
             extra_system_messages=[],
         )
+    if route == "ledger":
+        return RouteContext(
+            name="ledger",
+            system_prompt=load_prompt("route_ledger"),
+            tool_allowlist=frozenset({"ocr_receipt", "transcribe_audio", "ledger_upsert"}),
+            extra_system_messages=[],
+        )
     return RouteContext(
         name="external_knowledge",
         system_prompt=load_prompt("route_external_knowledge"),

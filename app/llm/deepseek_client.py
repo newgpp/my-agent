@@ -41,6 +41,7 @@ class DeepSeekClient:
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[Any] = None,
         temperature: float = 0.2,
+        max_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Run a non-streaming chat completion."""
         payload: Dict[str, Any] = {
@@ -48,6 +49,8 @@ class DeepSeekClient:
             "messages": messages,
             "temperature": temperature,
         }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
         if tools:
             payload["tools"] = tools
         if tool_choice is not None:

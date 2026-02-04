@@ -1,0 +1,7 @@
+date,merchant,amount,currency,category,payment_method,note,source_image,source_audio
+2026-02-03,星巴克,32.5,CNY,,,今天在星巴克消费32.5元,,
+2026-02-02,便利店,5,CNY,,,2月2日在便利店买水花了5元,,
+2026-02-02,麦当劳,48,CNY,,,昨天午饭在麦当劳消费48元，微信支付,,
+2026-02-01,打车,26.8,CNY,,,2026-02-01 打车花了26.8元,,
+2026-02-03,药店,78,CNY,,,帮我记一笔：在药店买感冒药花了78元,,
+2026-02-03,今天吃晚饭花了,20,CNY,,,,,/Users/mini/Documents/py_projects/my-agent/data_uploads/voice/20260203_154350_dadc4b5de6424162a63019ee88f0aa4e.m4a

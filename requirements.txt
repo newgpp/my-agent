@@ -1,6 +1,7 @@
 # 基础 Web 框架
 fastapi==0.115.0
 uvicorn[standard]==0.31.0
+python-multipart==0.0.9
 
 # MCP 核心协议 (Python SDK)
 mcp==1.2.0
