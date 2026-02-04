@@ -1,6 +1,7 @@
 import json
 import sys
 import subprocess
+import importlib.util
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -29,6 +30,20 @@ LEDGER_FIELDS = [
 ]
 
 REQUIRED_FIELDS = {"date", "merchant", "amount"}
+_OCR_MODULE = None
+
+
+def _load_ocr_module():
+    global _OCR_MODULE
+    if _OCR_MODULE is not None:
+        return _OCR_MODULE
+    spec = importlib.util.spec_from_file_location("ocr_receipt", OCR_SCRIPT)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Failed to load OCR module from {OCR_SCRIPT}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _OCR_MODULE = module
+    return module
 
 
 def _run_script_json(script_path: Path, args: list[str]) -> Dict[str, Any]:
@@ -89,7 +104,10 @@ def _row_exists(path: Path, row: Dict[str, str]) -> bool:
 @mcp.tool()
 def ocr_receipt(image_path: str, lang: str = "ch") -> Dict[str, Any]:
     """Run PaddleOCR on a receipt image and return structured JSON."""
-    payload = _run_script_json(OCR_SCRIPT, ["--image", image_path, "--lang", lang, "--output", "-"])
+    module = _load_ocr_module()
+    payload = module.run(Path(image_path), lang)
+    if not isinstance(payload, dict):
+        raise RuntimeError("OCR module returned unexpected payload.")
     return payload
 
 

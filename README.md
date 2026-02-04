@@ -17,6 +17,8 @@ pip install -r requirements.txt
 Create `.env` from `.env.example` and fill in keys:
 - `DEEPSEEK_API_KEY`
 - `TAVILY_API_KEY`
+- `OCR_API_URL`
+- `OCR_API_TOKEN`
 - `FS_ALLOWED_DIR_1` (required)
 - `FS_ALLOWED_DIR_2` (optional)
 - `APP_HOST` (optional, default `127.0.0.1`)
@@ -57,4 +59,7 @@ curl -I https://api.deepseek.com
 
 # Tavily API
 curl -I https://api.tavily.com
+
+# OCR API (replace with your endpoint)
+curl -I "$OCR_API_URL"
 ```

@@ -46,6 +46,20 @@ python -m app.main
 .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
+## 2026-02-03 进展
+
+- OCR 记账从本地 PaddleOCR 切换为远程 OCR API。
+- `ocr_receipt.py` 改为读取 `.env`（`OCR_API_URL`/`OCR_API_TOKEN`），并输出统一结构（`raw_text`/`lines`/`extracted`）。
+- `ledger` 接口移除 `lang` 入参，保留语音记账参数（`model`/`device`）。
+- `paddletest.py` 加入调试日志，确认返回结构为 `result.ocrResults[].prunedResult.rec_texts`。
+
+## 2026-02-04 进展
+
+- OCR 解析路径修正为 `ocrResults[].prunedResult.rec_texts`。
+- 增加 `OCR_API_URL`/`OCR_API_TOKEN`、`ASR_*` 的配置字段，避免 `.env` 额外字段报错。
+- OCR 请求从 `httpx` 调整为 `requests`，本地脚本直接调用能稳定返回结果。
+- 发现 `/v1/ledger/process` 走 MCP 子进程时偶发 DNS 解析失败，需要后续排查运行环境的网络解析。
+
 ## Agent 分层设计（当前）
 
 1) 意图识别层（Planner）
