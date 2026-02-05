@@ -102,6 +102,7 @@ class MCPRunner:
             }
         else:
             payload = result
+        payload = _prettify_mcp_payload(payload)
         logger.info(
             "MCP output tool={} server={} result={}",
             tool_name,
@@ -109,3 +110,27 @@ class MCPRunner:
             json.dumps(payload, ensure_ascii=False, default=str),
         )
         return result
+
+
+def _prettify_mcp_payload(payload: Any) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+    content = payload.get("content")
+    if not isinstance(content, list):
+        return payload
+    updated = []
+    for item in content:
+        if not isinstance(item, dict):
+            updated.append(item)
+            continue
+        text = item.get("text")
+        if isinstance(text, str):
+            try:
+                parsed = json.loads(text)
+            except Exception:
+                updated.append(item)
+            else:
+                updated.append({**item, "text": parsed})
+        else:
+            updated.append(item)
+    return {**payload, "content": updated}

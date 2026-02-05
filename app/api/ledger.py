@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 import json
+import re
 import importlib.util
 import os
 import shutil
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from app.config import get_settings
+from app.prompts.loader import load_prompt
 from app.mcp.runner import MCPRunner
 from app.llm.deepseek_client import DeepSeekClient
 
@@ -42,7 +44,7 @@ class ToolResponse(BaseModel):
 class ProcessResponse(BaseModel):
     upload: Optional[UploadResponse]
     parse: ToolResponse
-    upsert: ToolResponse
+    upsert: List[ToolResponse]
 
 
 def get_runner() -> MCPRunner:
@@ -90,11 +92,7 @@ def _write_upload_content(filename: str, content: bytes, target_dir: Path, allow
     return target_path
 
 
-LLM_SYSTEM_PROMPT = (
-    "Extract receipt fields from the user's text. "
-    "Return ONLY JSON with keys: date, merchant, amount, currency. "
-    "Use YYYY-MM-DD for date. If unknown, return empty string."
-)
+LLM_SYSTEM_PROMPT = load_prompt("ledger_extract")
 
 def _truncate_text(text: str, limit: int = 800) -> str:
     cleaned = text.strip()
@@ -116,6 +114,102 @@ def _extract_json(text: str) -> Dict[str, Any]:
         return json.loads(text[start : end + 1])
     except Exception:
         return {}
+
+
+_TIME_RE = re.compile(r"(上午|下午)?\d{1,2}:\d{2}")
+_AMOUNT_RE = re.compile(r"[¥￥]\s*\d+(?:\.\d{1,2})?")
+_DATE_RE = re.compile(r"\d{4}[年/-]\d{1,2}[月/-]\d{1,2}")
+_PAYMENT_HINT_RE = re.compile(r"(微信|支付宝|云闪付)")
+
+
+def _extract_lines(parse_result: Dict[str, Any]) -> List[str]:
+    lines = parse_result.get("lines")
+    if isinstance(lines, list) and lines:
+        extracted: List[str] = []
+        for item in lines:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str) and text.strip():
+                    extracted.append(text.strip())
+            elif isinstance(item, str) and item.strip():
+                extracted.append(item.strip())
+        if extracted:
+            return extracted
+    raw_text = parse_result.get("raw_text")
+    if isinstance(raw_text, str) and raw_text.strip():
+        return [line.strip() for line in raw_text.splitlines() if line.strip()]
+    return []
+
+
+def _extract_date_context(lines: List[str]) -> List[str]:
+    context: List[str] = []
+    for line in lines:
+        if _DATE_RE.search(line):
+            context.append(line)
+    return context
+
+
+def _extract_payment_context(lines: List[str]) -> List[str]:
+    context: List[str] = []
+    for line in lines:
+        if _PAYMENT_HINT_RE.search(line):
+            context.append(line)
+    return context
+
+
+def _split_receipt_entries(lines: List[str]) -> List[List[str]]:
+    if not lines:
+        return []
+    noise_lines = {"我的账单", "支付服务", "摇优惠", "日报设置"}
+    filtered = [line for line in lines if line.strip() and line.strip() not in noise_lines]
+    if not filtered:
+        return []
+
+    time_indices = [i for i, line in enumerate(filtered) if _TIME_RE.search(line)]
+    amount_indices = [i for i, line in enumerate(filtered) if _AMOUNT_RE.search(line)]
+    detail_indices = {i for i, line in enumerate(filtered) if "账单详情" in line}
+
+    # If no time/amount signals, fall back to a single segment.
+    if not time_indices or not amount_indices:
+        return [filtered]
+
+    max_gap = 7  # amount should appear within a small window after the time line
+    lead_window = 4  # include small lead-in context before time (e.g., 微信支付)
+    segments: List[List[str]] = []
+    last_end = 0
+    for idx, time_idx in enumerate(time_indices):
+        next_time = time_indices[idx + 1] if idx + 1 < len(time_indices) else len(filtered)
+        # Find the first amount after this time within window.
+        amount_idx = None
+        for ai in amount_indices:
+            if ai < time_idx:
+                continue
+            if ai - time_idx <= max_gap:
+                amount_idx = ai
+                break
+            if ai > next_time:
+                break
+        if amount_idx is None:
+            # No nearby amount; skip this time marker to avoid false segments.
+            continue
+
+        # Segment end: prefer the first "账单详情" after amount, otherwise next time.
+        end_idx = next_time
+        for di in range(amount_idx, next_time):
+            if di in detail_indices:
+                end_idx = di + 1
+                break
+        # Include a small lead-in context before time but don't cross previous segment.
+        lead_start = max(last_end, time_idx - lead_window)
+        lead_segment = filtered[lead_start:time_idx]
+        segment = [line for line in lead_segment + filtered[time_idx:end_idx] if "账单详情" not in line]
+        if segment:
+            segments.append(segment)
+            last_end = end_idx
+
+    if segments:
+        return segments
+    return [filtered]
 
 
 def _normalize_tool_output(result: Any) -> Dict[str, Any]:
@@ -179,7 +273,7 @@ async def _llm_extract_fields(text: str) -> Dict[str, str]:
     content = message.get("content") or ""
     payload = _extract_json(content)
     result = {}
-    for key in ("date", "merchant", "amount", "currency"):
+    for key in ("date", "merchant", "amount", "currency", "category", "payment_method"):
         value = payload.get(key) if isinstance(payload, dict) else None
         if value is None:
             result[key] = ""
@@ -262,44 +356,85 @@ async def ledger_process(
             raise HTTPException(status_code=500, detail=detail)
 
     text_for_llm = ""
+    lines_for_llm: List[str] = []
     if isinstance(parse.result, dict):
         raw_text = parse.result.get("raw_text")
         if isinstance(raw_text, str):
             text_for_llm = raw_text
+        lines_for_llm = _extract_lines(parse.result)
     if text:
         text_for_llm = f"{text_for_llm}\n{text}".strip() if text_for_llm else text.strip()
 
-    if not text_for_llm:
+    if not text_for_llm and not lines_for_llm:
         raise HTTPException(status_code=400, detail="No OCR/transcript/text available for extraction.")
 
-    llm_fields = await _llm_extract_fields(text_for_llm)
-    payload: Dict[str, Any] = {
-        "date": llm_fields.get("date") or "",
-        "merchant": llm_fields.get("merchant") or "",
-        "amount": llm_fields.get("amount") or "",
-        "currency": llm_fields.get("currency") or "",
-        "category": "",
-        "payment_method": "",
-        "note": text.strip() if text else "",
-        "source_image": upload.path if upload and upload.media_type == "image" else "",
-        "source_audio": upload.path if upload and upload.media_type == "audio" else "",
-    }
-    missing = [field for field in ("date", "merchant", "amount") if not payload.get(field)]
-    if missing:
+    segments = _split_receipt_entries(lines_for_llm)
+    if len(segments) <= 1:
+        segments = [lines_for_llm] if lines_for_llm else [text_for_llm.splitlines()]
+
+    date_context = _extract_date_context(lines_for_llm)
+    payment_context = _extract_payment_context(lines_for_llm)
+    upserts: List[ToolResponse] = []
+    inserted = 0
+    missing_entries: List[Dict[str, Any]] = []
+    for segment in segments:
+        segment_text = "\n".join(segment).strip()
+        if not segment_text:
+            continue
+        combined_text = segment_text
+        if date_context:
+            combined_text = "\n".join(date_context) + "\n" + combined_text
+        if payment_context and not _PAYMENT_HINT_RE.search(combined_text):
+            combined_text = "\n".join(payment_context) + "\n" + combined_text
+        if text:
+            combined_text = f"{combined_text}\n{text}".strip()
+        llm_fields = await _llm_extract_fields(combined_text)
+        payload: Dict[str, Any] = {
+            "date": llm_fields.get("date") or "",
+            "merchant": llm_fields.get("merchant") or "",
+            "amount": llm_fields.get("amount") or "",
+            "currency": llm_fields.get("currency") or "",
+            "category": llm_fields.get("category") or "",
+            "payment_method": llm_fields.get("payment_method") or "",
+            "note": text.strip() if text else "",
+            "source_image": upload.path if upload and upload.media_type == "image" else "",
+            "source_audio": upload.path if upload and upload.media_type == "audio" else "",
+        }
+        if not payload.get("date"):
+            payload["date"] = date.today().isoformat()
+        missing = [field for field in ("date", "merchant", "amount") if not payload.get(field)]
+        if missing:
+            missing_entries.append({"missing": missing, "row": payload})
+            upserts.append(
+                ToolResponse(
+                    result={
+                        "status": "skipped",
+                        "reason": "missing_required_fields",
+                        "missing": missing,
+                        "row": payload,
+                    }
+                )
+            )
+            continue
+        result = await runner.call_tool(
+            "ledger",
+            "ledger_upsert",
+            {"payload": payload, "dedupe": True, "csv_path": None},
+        )
+        if hasattr(result, "model_dump"):
+            upsert_data = result.model_dump(mode="json", by_alias=True, exclude_none=True)
+        else:
+            upsert_data = result
+        upserts.append(ToolResponse(result=upsert_data))
+        inserted += 1
+
+    if inserted == 0 and missing_entries:
         raise HTTPException(
             status_code=400,
-            detail={"message": "Missing required fields after LLM extraction.", "missing": missing},
+            detail={
+                "message": "Missing required fields after LLM extraction.",
+                "missing_entries": missing_entries,
+            },
         )
 
-    result = await runner.call_tool(
-        "ledger",
-        "ledger_upsert",
-        {"payload": payload, "dedupe": True, "csv_path": None},
-    )
-    if hasattr(result, "model_dump"):
-        upsert_data = result.model_dump(mode="json", by_alias=True, exclude_none=True)
-    else:
-        upsert_data = result
-    upsert = ToolResponse(result=upsert_data)
-
-    return ProcessResponse(upload=upload, parse=parse, upsert=upsert)
+    return ProcessResponse(upload=upload, parse=parse, upsert=upserts)

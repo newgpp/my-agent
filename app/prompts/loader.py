@@ -10,6 +10,7 @@ _PROMPT_MAP = {
     "text_to_sql": "prompts/text_to_sql.md",
     "route_sql_generate": "prompts/route_sql_generate.md",
     "route_ledger": "prompts/route_ledger.md",
+    "ledger_extract": "prompts/ledger_extract.md",
 }
 
 

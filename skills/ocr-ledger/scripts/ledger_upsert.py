@@ -70,6 +70,19 @@ def _row_exists(csv_path: Path, row: Dict[str, str]) -> bool:
     return False
 
 
+def _ensure_trailing_newline(csv_path: Path) -> None:
+    if not csv_path.exists():
+        return
+    if csv_path.stat().st_size == 0:
+        return
+    with csv_path.open("rb") as handle:
+        handle.seek(-1, 2)
+        last_byte = handle.read(1)
+    if last_byte != b"\n":
+        with csv_path.open("ab") as handle:
+            handle.write(b"\n")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", help="JSON string with ledger fields")
@@ -103,6 +116,7 @@ def main() -> int:
         )
         return 0
 
+    _ensure_trailing_newline(csv_path)
     with csv_path.open("a", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=FIELDS)
         writer.writerow(row)
