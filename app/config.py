@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     mcp_config_path: str = Field(default="mcp_servers.json", alias="MCP_CONFIG_PATH")
     fs_allowed_dir_1: Optional[str] = Field(default=None, alias="FS_ALLOWED_DIR_1")
     fs_allowed_dir_2: Optional[str] = Field(default=None, alias="FS_ALLOWED_DIR_2")
+    ocr_segment_debug: Optional[str] = Field(default=None, alias="OCR_SEGMENT_DEBUG")
     app_host: str = Field(default="127.0.0.1", alias="APP_HOST")
     app_port: int = Field(default=8000, alias="APP_PORT")
 

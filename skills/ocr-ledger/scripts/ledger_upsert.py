@@ -21,6 +21,7 @@ FIELDS: List[str] = [
     "note",
     "source_image",
     "source_audio",
+    "insert_time",
 ]
 REQUIRED_FIELDS = {"date", "merchant", "amount"}
 
@@ -46,28 +47,27 @@ def _validate_payload(payload: Dict[str, str]) -> Dict[str, str]:
 
 def _ensure_csv(csv_path: Path) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
-    if csv_path.exists():
+    if not csv_path.exists():
+        with csv_path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=FIELDS)
+            writer.writeheader()
+        return
+    with csv_path.open("r", newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        existing_fields = reader.fieldnames or []
+        rows = list(reader)
+    if "insert_time" in existing_fields:
         return
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=FIELDS)
         writer.writeheader()
+        for row in rows:
+            row.setdefault("insert_time", "")
+            writer.writerow(row)
 
 
-def _row_exists(csv_path: Path, row: Dict[str, str]) -> bool:
-    if not csv_path.exists():
-        return False
-    with csv_path.open("r", newline="", encoding="utf-8") as handle:
-        reader = csv.DictReader(handle)
-        for existing in reader:
-            if (
-                existing.get("date") == row.get("date")
-                and existing.get("merchant") == row.get("merchant")
-                and existing.get("amount") == row.get("amount")
-                and existing.get("source_image") == row.get("source_image")
-                and existing.get("source_audio") == row.get("source_audio")
-            ):
-                return True
-    return False
+def _basename(value: str) -> str:
+    return Path(value).name if value else ""
 
 
 def _ensure_trailing_newline(csv_path: Path) -> None:
@@ -101,21 +101,12 @@ def main() -> int:
     csv_path = Path(args.csv).expanduser().resolve() if args.csv else CSV_PATH
     _ensure_csv(csv_path)
 
-    if args.dedupe and _row_exists(csv_path, row):
-        print(
-            json.dumps(
-                {
-                    "status": "skipped",
-                    "reason": "duplicate",
-                    "csv_path": str(csv_path),
-                    "row": row,
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
-        return 0
+    row["source_image"] = _basename(row.get("source_image", ""))
+    row["source_audio"] = _basename(row.get("source_audio", ""))
+    if not row.get("insert_time"):
+        from datetime import datetime
 
+        row["insert_time"] = datetime.now().isoformat()
     _ensure_trailing_newline(csv_path)
     with csv_path.open("a", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=FIELDS)

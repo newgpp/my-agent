@@ -80,14 +80,20 @@ def _extract_lines_from_api(result: Dict[str, Any]) -> List[Dict[str, Any]]:
             if not isinstance(pruned, dict):
                 continue
             rec_texts = pruned.get("rec_texts")
+            rec_boxes = pruned.get("rec_boxes")
+            if not isinstance(rec_boxes, list):
+                rec_boxes = None
             if not isinstance(rec_texts, list):
                 continue
-            for raw in rec_texts:
+            for idx, raw in enumerate(rec_texts):
                 if not isinstance(raw, str):
                     continue
                 text = raw.strip()
                 if text:
-                    lines.append({"text": text, "score": None})
+                    entry = {"text": text, "score": None}
+                    if rec_boxes and idx < len(rec_boxes) and isinstance(rec_boxes[idx], list):
+                        entry["bbox"] = rec_boxes[idx]
+                    lines.append(entry)
     return lines
 
 

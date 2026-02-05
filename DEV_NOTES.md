@@ -60,6 +60,17 @@ python -m app.main
 - OCR 请求从 `httpx` 调整为 `requests`，本地脚本直接调用能稳定返回结果。
 - 发现 `/v1/ledger/process` 走 MCP 子进程时偶发 DNS 解析失败，需要后续排查运行环境的网络解析。
 
+## 2026-02-05 进展
+
+- `/v1/ledger/process` 拆分为 `app/services/ocr_ledger.py` 与 `app/services/asr_ledger.py`，API 层只做编排与写入。
+- OCR 支持多条记录识别：基于 OCR bbox 行聚类 + 多种锚点（`2月4日07:46`、`02.03周六`、`账单详情>` 等）分段。
+- LLM 提示词升级为数组输出；单次调用可提取多条记录。
+- 新增批量写入 `ledger_upsert_many`，减少 MCP 往返。
+- CSV 变更：
+  - 新增 `insert_time` 列（本地时间 `isoformat`）。
+  - `source_image`/`source_audio` 只保存文件名。
+  - 取消去重逻辑，避免同日同额记录被跳过。
+
 ## Agent 分层设计（当前）
 
 1) 意图识别层（Planner）

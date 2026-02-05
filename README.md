@@ -50,6 +50,24 @@ curl -G -N --data-urlencode "message=列出Downloads前10个文件" "http://127.
 curl -G -N --data-urlencode "message=用tavily搜索旧金山今天天气" "http://127.0.0.1:8000/v1/chat/sse"
 ```
 
+## Ledger (OCR/ASR)
+The ledger pipeline supports multi-record extraction from a single image or audio input.
+
+Key behavior:
+- OCR uses bbox-based line grouping and robust segmenting for list-style bills.
+- LLM returns a JSON array of records in a single call.
+- Batch insert via `ledger_upsert_many`.
+- CSV columns: `date, merchant, amount, currency, category, payment_method, note, source_image, source_audio, insert_time`
+- `source_image`/`source_audio` store only the filename.
+- `insert_time` uses local time `isoformat`.
+- No deduplication is applied.
+
+Example:
+```bash
+curl -X POST "http://127.0.0.1:8000/v1/ledger/process" \
+  -F "file=@/path/to/receipt.jpg"
+```
+
 ## Network checks
 If tool calls fail, verify network access:
 

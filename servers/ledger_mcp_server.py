@@ -27,6 +27,7 @@ LEDGER_FIELDS = [
     "note",
     "source_image",
     "source_audio",
+    "insert_time",
 ]
 
 REQUIRED_FIELDS = {"date", "merchant", "amount"}
@@ -65,13 +66,27 @@ def _run_script_json(script_path: Path, args: list[str]) -> Dict[str, Any]:
 
 def _ensure_csv(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
-        return
     import csv
 
+    if not path.exists():
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=LEDGER_FIELDS)
+            writer.writeheader()
+        return
+
+    # If file exists but header is missing new columns, rewrite with updated header.
+    with path.open("r", newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        existing_fields = reader.fieldnames or []
+        rows = list(reader)
+    if "insert_time" in existing_fields:
+        return
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=LEDGER_FIELDS)
         writer.writeheader()
+        for row in rows:
+            row.setdefault("insert_time", "")
+            writer.writerow(row)
 
 
 def _validate_payload(payload: Dict[str, Any]) -> Dict[str, str]:
@@ -82,23 +97,8 @@ def _validate_payload(payload: Dict[str, Any]) -> Dict[str, str]:
     return normalized
 
 
-def _row_exists(path: Path, row: Dict[str, str]) -> bool:
-    if not path.exists():
-        return False
-    import csv
-
-    with path.open("r", newline="", encoding="utf-8") as handle:
-        reader = csv.DictReader(handle)
-        for existing in reader:
-            if (
-                existing.get("date") == row.get("date")
-                and existing.get("merchant") == row.get("merchant")
-                and existing.get("amount") == row.get("amount")
-                and existing.get("source_image") == row.get("source_image")
-                and existing.get("source_audio") == row.get("source_audio")
-            ):
-                return True
-    return False
+def _basename(value: str) -> str:
+    return Path(value).name if value else ""
 
 
 @mcp.tool()
@@ -132,13 +132,16 @@ def transcribe_audio(audio_path: str, model: str = "small", device: str = "cpu")
 
 @mcp.tool()
 def ledger_upsert(payload: Dict[str, Any], dedupe: bool = True, csv_path: Optional[str] = None) -> Dict[str, Any]:
-    """Append a ledger record to CSV with optional deduplication."""
+    """Append a ledger record to CSV."""
     csv_path = Path(csv_path).expanduser().resolve() if csv_path else LEDGER_CSV
     row = _validate_payload(payload)
-    _ensure_csv(csv_path)
+    row["source_image"] = _basename(row.get("source_image", ""))
+    row["source_audio"] = _basename(row.get("source_audio", ""))
+    if not row.get("insert_time"):
+        from datetime import datetime
 
-    if dedupe and _row_exists(csv_path, row):
-        return {"status": "skipped", "reason": "duplicate", "csv_path": str(csv_path), "row": row}
+        row["insert_time"] = datetime.now().isoformat()
+    _ensure_csv(csv_path)
 
     import csv
 
@@ -147,6 +150,35 @@ def ledger_upsert(payload: Dict[str, Any], dedupe: bool = True, csv_path: Option
         writer.writerow(row)
 
     return {"status": "inserted", "csv_path": str(csv_path), "row": row}
+
+
+@mcp.tool()
+def ledger_upsert_many(
+    payloads: list[Dict[str, Any]],
+    dedupe: bool = True,
+    csv_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Append multiple ledger records to CSV."""
+    csv_path = Path(csv_path).expanduser().resolve() if csv_path else LEDGER_CSV
+    _ensure_csv(csv_path)
+
+    import csv
+
+    results: list[Dict[str, Any]] = []
+    with csv_path.open("a", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=LEDGER_FIELDS)
+        for payload in payloads:
+            row = _validate_payload(payload)
+            row["source_image"] = _basename(row.get("source_image", ""))
+            row["source_audio"] = _basename(row.get("source_audio", ""))
+            if not row.get("insert_time"):
+                from datetime import datetime
+
+                row["insert_time"] = datetime.now().isoformat()
+            writer.writerow(row)
+            results.append({"status": "inserted", "csv_path": str(csv_path), "row": row})
+
+    return {"results": results}
 
 
 if __name__ == "__main__":
