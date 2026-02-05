@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -143,11 +142,6 @@ async def ledger_process(
         elif ext in AUDIO_EXTENSIONS:
             if os.getenv("ASR_DISABLED", "").lower() in ("1", "true", "yes"):
                 raise HTTPException(status_code=400, detail="ASR is disabled.")
-            if not shutil.which("ffmpeg"):
-                raise HTTPException(
-                    status_code=500,
-                    detail="ffmpeg is required to decode m4a. Please install ffmpeg on the server.",
-                )
             path = _write_upload_content(filename, content, VOICE_DIR, AUDIO_EXTENSIONS)
             media_type = "audio"
         else:

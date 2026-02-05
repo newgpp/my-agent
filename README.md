@@ -17,6 +17,7 @@ pip install -r requirements.txt
 Create `.env` from `.env.example` and fill in keys:
 - `DEEPSEEK_API_KEY`
 - `TAVILY_API_KEY`
+- `GROQ_API_KEY`
 - `OCR_API_URL`
 - `OCR_API_TOKEN`
 - `FS_ALLOWED_DIR_1` (required)

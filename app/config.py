@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     deepseek_base_url: str = Field(default="https://api.deepseek.com", alias="DEEPSEEK_BASE_URL")
     deepseek_model: str = Field(default="deepseek-chat", alias="DEEPSEEK_MODEL")
     tavily_api_key: Optional[str] = Field(default=None, alias="TAVILY_API_KEY")
+    groq_api_key: Optional[str] = Field(default=None, alias="GROQ_API_KEY")
+    groq_asr_model: Optional[str] = Field(default=None, alias="GROQ_ASR_MODEL")
     ocr_api_url: Optional[str] = Field(default=None, alias="OCR_API_URL")
     ocr_api_token: Optional[str] = Field(default=None, alias="OCR_API_TOKEN")
     ocr_api_ip: Optional[str] = Field(default=None, alias="OCR_API_IP")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Transcribe WAV audio via faster-whisper and output structured JSON.
+Transcribe audio via Groq Whisper and output structured JSON.
 """
 
 import argparse
@@ -9,6 +9,10 @@ import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+import os
+
+from groq import Groq
 
 AMOUNT_RE = re.compile(r"(?<!\d)(\d{1,3}(?:,?\d{3})*(?:\.\d{1,2})?)(?!\d)")
 DATE_RE = re.compile(r"(20\d{2}[/-]\d{1,2}[/-]\d{1,2})")
@@ -22,22 +26,12 @@ CURRENCY_HINTS = {
     "元": "CNY",
 }
 
-
-def _load_whisper(model: str, device: str):
-    # Ensure HF cache directory is writable in the workspace.
-    base_dir = Path(__file__).resolve().parents[3]
-    cache_dir = base_dir / "data_uploads" / "hf_cache"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    import os
-
-    os.environ.setdefault("HF_HOME", str(cache_dir))
-    try:
-        from faster_whisper import WhisperModel
-    except Exception as exc:
-        raise RuntimeError(
-            "faster-whisper is not available. Install faster-whisper in the runtime environment."
-        ) from exc
-    return WhisperModel(model, device=device)
+def _resolve_groq_model(model: str) -> str:
+    if model in ("whisper-large-v3", "whisper-large-v3-turbo"):
+        return model
+    if model in ("small", "base", "medium", "large"):
+        return "whisper-large-v3-turbo"
+    return os.getenv("GROQ_ASR_MODEL", "whisper-large-v3-turbo")
 
 
 def _extract_date(text: str) -> Optional[str]:
@@ -66,23 +60,24 @@ def _extract_currency(text: str) -> Optional[str]:
 
 
 def run(audio_path: Path, model: str, device: str) -> Dict[str, Any]:
-    whisper = _load_whisper(model, device)
-    segments, info = whisper.transcribe(str(audio_path), language="zh")
-
-    segment_list: List[Dict[str, Any]] = []
-    raw_parts: List[str] = []
-    for segment in segments:
-        segment_list.append(
-            {
-                "start": segment.start,
-                "end": segment.end,
-                "text": segment.text,
-                "avg_logprob": getattr(segment, "avg_logprob", None),
-            }
+    api_key = (os.getenv("GROQ_API_KEY") or "").strip()
+    if not api_key:
+        raise RuntimeError("Missing GROQ_API_KEY")
+    client = Groq(api_key=api_key)
+    groq_model = _resolve_groq_model(model)
+    with audio_path.open("rb") as file:
+        transcription = client.audio.transcriptions.create(
+            file=(audio_path.name, file.read()),
+            model=groq_model,
+            language="zh",
+            response_format="verbose_json",
         )
-        raw_parts.append(segment.text)
-
-    raw_text = " ".join(raw_parts).strip()
+    if isinstance(transcription, dict):
+        raw_text = (transcription.get("text") or "").strip()
+        segment_list = transcription.get("segments") or []
+    else:
+        raw_text = (getattr(transcription, "text", "") or "").strip()
+        segment_list = getattr(transcription, "segments", []) or []
 
     extracted = {
         "date": _extract_date(raw_text),
@@ -93,7 +88,7 @@ def run(audio_path: Path, model: str, device: str) -> Dict[str, Any]:
 
     return {
         "audio_path": str(audio_path),
-        "language": getattr(info, "language", None),
+        "language": "zh",
         "raw_text": raw_text,
         "segments": segment_list,
         "extracted": extracted,
