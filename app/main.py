@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.mcp.runner import MCPRunner
 from loguru import logger
 
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """FastAPI lifespan handler for MCP runner."""

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 _RESOURCE_MAP = {
     "context://db_schema": "resources/db_schema.sql",
     "context://business_glossary": "resources/business_glossary.md",

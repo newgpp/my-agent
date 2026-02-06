@@ -99,7 +99,9 @@ async def build_final_messages(
     tool_result_text = _format_tool_results(tool_outputs)
 
     final_user_message = planner_output.final_user_message or user_message
-    messages: List[ChatMessage] = [ChatMessage(role="system", content=route_context.system_prompt)]
+    messages: List[ChatMessage] = [
+        ChatMessage(role="system", content=route_context.system_prompt)
+    ]
     for extra in route_context.extra_system_messages:
         messages.append(ChatMessage(role="system", content=extra))
     messages.append(ChatMessage(role="user", content=final_user_message))

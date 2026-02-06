@@ -5,13 +5,18 @@ from loguru import logger
 
 from app.mcp.schemas import MCPTool, OpenAIFunction, OpenAITool, ToolResultContent
 
+
 def _tool_to_openai(tool: Any, server_name: str) -> Dict[str, Any]:
     """Convert an MCP tool to OpenAI tools format."""
     mcp_tool = (
         MCPTool.model_validate(tool)
         if isinstance(tool, dict)
         else MCPTool.model_validate(
-            {"name": getattr(tool, "name", None), "description": getattr(tool, "description", None), "inputSchema": getattr(tool, "inputSchema", None) or {}}
+            {
+                "name": getattr(tool, "name", None),
+                "description": getattr(tool, "description", None),
+                "inputSchema": getattr(tool, "inputSchema", None) or {},
+            }
         )
     )
 
@@ -48,9 +53,15 @@ def build_openai_tools(
 def tool_result_to_text(result: Any) -> str:
     """Serialize MCP tool result to a JSON string."""
     if hasattr(result, "model_dump"):
-        return json.dumps(result.model_dump(mode="json", by_alias=True, exclude_none=True), ensure_ascii=False)
+        return json.dumps(
+            result.model_dump(mode="json", by_alias=True, exclude_none=True),
+            ensure_ascii=False,
+        )
     if isinstance(result, dict) and "content" in result:
-        return json.dumps(ToolResultContent.model_validate(result).model_dump(exclude_none=True), ensure_ascii=False)
+        return json.dumps(
+            ToolResultContent.model_validate(result).model_dump(exclude_none=True),
+            ensure_ascii=False,
+        )
     if hasattr(result, "content"):
         payload = ToolResultContent(
             content=getattr(result, "content", None),

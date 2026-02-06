@@ -4,10 +4,9 @@ from datetime import date
 from typing import Any, Dict, List, Optional
 
 from app.mcp.runner import MCPRunner
-from app.services.ocr_ledger import normalize_tool_output
+from app.ledger.ocr_extract import normalize_tool_output
 
-from app.services.ledger_extract import llm_extract_many
-from app.services.ocr_ledger import (
+from app.ledger.ocr_extract import (
     PAYMENT_HINT_RE,
     extract_date_context,
     extract_payment_context,
@@ -37,16 +36,18 @@ async def parse_audio(
     return normalize_tool_output(raw_result)
 
 
-async def build_payloads_from_asr(
-    parse_result: Dict[str, Any],
+async def build_combined_texts_from_asr(
+    runner: MCPRunner,
+    audio_path: str,
     text: Optional[str],
-    source_image: str,
-    source_audio: str,
-) -> List[Dict[str, Any]]:
+) -> List[str]:
+    parse_result = await parse_audio(runner, audio_path)
     raw_text = parse_result.get("raw_text") if isinstance(parse_result, dict) else ""
     text_for_llm = raw_text.strip() if isinstance(raw_text, str) else ""
     if text:
-        text_for_llm = f"{text_for_llm}\n{text}".strip() if text_for_llm else text.strip()
+        text_for_llm = (
+            f"{text_for_llm}\n{text}".strip() if text_for_llm else text.strip()
+        )
 
     if not text_for_llm:
         raise ValueError("No ASR/text available for extraction.")
@@ -70,7 +71,16 @@ async def build_payloads_from_asr(
             combined_text = "\n".join(payment_context) + "\n" + combined_text
         combined_texts.append(combined_text)
 
-    llm_records = await llm_extract_many(combined_texts)
+    return combined_texts
+
+
+def build_payloads_from_asr(
+    llm_records: List[Dict[str, Any]],
+    combined_texts: List[str],
+    text: Optional[str],
+    source_image: str,
+    source_audio: str,
+) -> tuple[List[Dict[str, Any]], List[str]]:
     payloads: List[Dict[str, Any]] = []
     for idx, _ in enumerate(combined_texts):
         llm_fields = llm_records[idx] if idx < len(llm_records) else {}
@@ -88,4 +98,4 @@ async def build_payloads_from_asr(
         if not payload.get("date"):
             payload["date"] = date.today().isoformat()
         payloads.append(payload)
-    return payloads
+    return payloads, combined_texts

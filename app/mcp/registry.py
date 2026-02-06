@@ -7,6 +7,7 @@ from loguru import logger
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
+
 class MCPServerConfig(BaseModel):
     name: Optional[str] = None
     command: str

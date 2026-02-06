@@ -6,6 +6,7 @@ from loguru import logger
 
 from app.config import get_settings
 
+
 class DeepSeekClient:
     def __init__(
         self,
@@ -56,13 +57,20 @@ class DeepSeekClient:
         if tool_choice is not None:
             payload["tool_choice"] = tool_choice
 
-        logger.info("LLM input payload={}", json.dumps(payload, ensure_ascii=False, default=str))
+        logger.info(
+            "LLM input payload={}", json.dumps(payload, ensure_ascii=False, default=str)
+        )
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            logger.info("DeepSeek chat request messages={} tools={}", len(messages), bool(tools))
+            logger.info(
+                "DeepSeek chat request messages={} tools={}", len(messages), bool(tools)
+            )
             resp = await client.post(self._url(), headers=self._headers(), json=payload)
             resp.raise_for_status()
             data = resp.json()
-            logger.info("LLM output response={}", json.dumps(data, ensure_ascii=False, default=str))
+            logger.info(
+                "LLM output response={}",
+                json.dumps(data, ensure_ascii=False, default=str),
+            )
             return data
 
     async def stream_chat(
@@ -84,10 +92,18 @@ class DeepSeekClient:
         if tool_choice is not None:
             payload["tool_choice"] = tool_choice
 
-        logger.info("LLM input payload={}", json.dumps(payload, ensure_ascii=False, default=str))
+        logger.info(
+            "LLM input payload={}", json.dumps(payload, ensure_ascii=False, default=str)
+        )
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            logger.info("DeepSeek stream request messages={} tools={}", len(messages), bool(tools))
-            async with client.stream("POST", self._url(), headers=self._headers(), json=payload) as resp:
+            logger.info(
+                "DeepSeek stream request messages={} tools={}",
+                len(messages),
+                bool(tools),
+            )
+            async with client.stream(
+                "POST", self._url(), headers=self._headers(), json=payload
+            ) as resp:
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
                     if not line or not line.startswith("data:"):

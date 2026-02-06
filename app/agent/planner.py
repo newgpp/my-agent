@@ -49,12 +49,16 @@ def _summarize_tools(tools_by_server: Dict[str, List[Any]]) -> List[str]:
     summaries: List[str] = []
     for server_tools in tools_by_server.values():
         for tool in server_tools:
-            mcp_tool = MCPTool.model_validate(tool) if isinstance(tool, dict) else MCPTool.model_validate(
-                {
-                    "name": getattr(tool, "name", None),
-                    "description": getattr(tool, "description", None),
-                    "inputSchema": getattr(tool, "inputSchema", None) or {},
-                }
+            mcp_tool = (
+                MCPTool.model_validate(tool)
+                if isinstance(tool, dict)
+                else MCPTool.model_validate(
+                    {
+                        "name": getattr(tool, "name", None),
+                        "description": getattr(tool, "description", None),
+                        "inputSchema": getattr(tool, "inputSchema", None) or {},
+                    }
+                )
             )
             if not mcp_tool.name:
                 continue

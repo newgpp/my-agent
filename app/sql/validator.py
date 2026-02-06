@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from typing import Tuple
 
-
 _FORBIDDEN_KEYWORDS = [
     "INSERT",
     "UPDATE",
@@ -57,4 +56,6 @@ def validate_sql(sql: str) -> Tuple[bool, str]:
 
 def contains_forbidden_keyword(text: str) -> bool:
     upper_text = text.upper()
-    return any(re.search(rf"\b{keyword}\b", upper_text) for keyword in _FORBIDDEN_KEYWORDS)
+    return any(
+        re.search(rf"\b{keyword}\b", upper_text) for keyword in _FORBIDDEN_KEYWORDS
+    )

@@ -25,7 +25,9 @@ def _extract_tools(result: Any) -> List[Any]:
 
 class MCPClientSession(ClientSession):
     def __init__(self, read_stream, write_stream, roots: List[str]) -> None:
-        super().__init__(read_stream, write_stream, read_timeout_seconds=timedelta(seconds=30))
+        super().__init__(
+            read_stream, write_stream, read_timeout_seconds=timedelta(seconds=30)
+        )
         self._roots = roots
 
     async def _received_request(self, responder) -> None:
@@ -38,7 +40,9 @@ class MCPClientSession(ClientSession):
                 except ValueError:
                     continue
                 roots.append(types.Root(uri=types.FileUrl(uri), name=Path(path).name))
-            await responder.respond(types.ClientResult(types.ListRootsResult(roots=roots)))
+            await responder.respond(
+                types.ClientResult(types.ListRootsResult(roots=roots))
+            )
 
 
 class MCPRunner:
@@ -55,14 +59,18 @@ class MCPRunner:
         """Start all MCP servers and initialize sessions."""
         self._servers = load_mcp_servers(self._config_path)
         for name, cfg in self._servers.items():
-            logger.info("Starting MCP server {} command={} args={}", name, cfg.command, cfg.args)
+            logger.info(
+                "Starting MCP server {} command={} args={}", name, cfg.command, cfg.args
+            )
             params = StdioServerParameters(
                 command=cfg.command,
                 args=cfg.args,
                 env={**os.environ, **(cfg.env or {})},
             )
             read, write = await self._stack.enter_async_context(stdio_client(params))
-            session = await self._stack.enter_async_context(MCPClientSession(read, write, self._roots))
+            session = await self._stack.enter_async_context(
+                MCPClientSession(read, write, self._roots)
+            )
             await session.initialize()
             self._sessions[name] = session
             logger.info("MCP server started {}", name)
@@ -81,7 +89,9 @@ class MCPRunner:
             tools_by_server[name] = _extract_tools(result)
         return tools_by_server
 
-    async def call_tool(self, server_name: str, tool_name: str, arguments: Dict[str, Any]) -> Any:
+    async def call_tool(
+        self, server_name: str, tool_name: str, arguments: Dict[str, Any]
+    ) -> Any:
         """Call a tool on a specific MCP server."""
         if server_name not in self._sessions:
             raise RuntimeError(f"MCP server not started: {server_name}")

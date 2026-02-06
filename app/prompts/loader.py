@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 _PROMPT_MAP = {
     "chat_planner": "prompts/chat_planner.md",
     "route_external_knowledge": "prompts/route_external_knowledge.md",

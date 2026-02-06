@@ -42,6 +42,7 @@ async def chat_sse(
     client: DeepSeekClient = Depends(get_client),
 ) -> StreamingResponse:
     """SSE endpoint for chat streaming with tool execution."""
+
     async def event_stream() -> AsyncIterator[str]:
         try:
             logger.info("SSE request received message_len={}", len(message))

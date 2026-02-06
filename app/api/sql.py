@@ -28,6 +28,7 @@ async def sql_sse(
     client: DeepSeekClient = Depends(get_client),
 ) -> StreamingResponse:
     """SSE endpoint for text-to-sql generation."""
+
     async def event_stream() -> AsyncIterator[str]:
         try:
             logger.info("SQL SSE request received message_len={}", len(message))
