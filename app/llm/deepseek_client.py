@@ -1,3 +1,4 @@
+from functools import lru_cache
 import json
 from typing import Any, AsyncIterator, Dict, List, Optional
 
@@ -21,6 +22,7 @@ class DeepSeekClient:
         self.base_url = (base_url or settings.deepseek_base_url).rstrip("/")
         self.model = model or settings.deepseek_model
         self.timeout = timeout
+        self._http_client: Optional[httpx.AsyncClient] = None
         if not self.api_key:
             raise RuntimeError("DEEPSEEK_API_KEY is not set")
         logger.info("DeepSeek client initialized model={}", self.model)
@@ -35,6 +37,11 @@ class DeepSeekClient:
     def _url(self) -> str:
         """Build chat completions endpoint URL."""
         return f"{self.base_url}/chat/completions"
+
+    def _get_http_client(self) -> httpx.AsyncClient:
+        if self._http_client is None:
+            self._http_client = httpx.AsyncClient(timeout=self.timeout)
+        return self._http_client
 
     async def chat(
         self,
@@ -60,18 +67,18 @@ class DeepSeekClient:
         logger.info(
             "LLM input payload={}", json.dumps(payload, ensure_ascii=False, default=str)
         )
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            logger.info(
-                "DeepSeek chat request messages={} tools={}", len(messages), bool(tools)
-            )
-            resp = await client.post(self._url(), headers=self._headers(), json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            logger.info(
-                "LLM output response={}",
-                json.dumps(data, ensure_ascii=False, default=str),
-            )
-            return data
+        client = self._get_http_client()
+        logger.info(
+            "DeepSeek chat request messages={} tools={}", len(messages), bool(tools)
+        )
+        resp = await client.post(self._url(), headers=self._headers(), json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        logger.info(
+            "LLM output response={}",
+            json.dumps(data, ensure_ascii=False, default=str),
+        )
+        return data
 
     async def stream_chat(
         self,
@@ -95,26 +102,31 @@ class DeepSeekClient:
         logger.info(
             "LLM input payload={}", json.dumps(payload, ensure_ascii=False, default=str)
         )
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            logger.info(
-                "DeepSeek stream request messages={} tools={}",
-                len(messages),
-                bool(tools),
-            )
-            async with client.stream(
-                "POST", self._url(), headers=self._headers(), json=payload
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line or not line.startswith("data:"):
-                        continue
-                    data = line[len("data:") :].strip()
-                    if data == "[DONE]":
-                        logger.info("LLM stream output=[DONE]")
-                        break
-                    try:
-                        chunk = json.loads(data)
-                        # logger.info("LLM stream output={}", json.dumps(chunk, ensure_ascii=False, default=str))
-                        yield chunk
-                    except json.JSONDecodeError:
-                        continue
+        client = self._get_http_client()
+        logger.info(
+            "DeepSeek stream request messages={} tools={}",
+            len(messages),
+            bool(tools),
+        )
+        async with client.stream(
+            "POST", self._url(), headers=self._headers(), json=payload
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line or not line.startswith("data:"):
+                    continue
+                data = line[len("data:") :].strip()
+                if data == "[DONE]":
+                    logger.info("LLM stream output=[DONE]")
+                    break
+                try:
+                    chunk = json.loads(data)
+                    # logger.info("LLM stream output={}", json.dumps(chunk, ensure_ascii=False, default=str))
+                    yield chunk
+                except json.JSONDecodeError:
+                    continue
+
+
+@lru_cache(maxsize=1)
+def get_client() -> DeepSeekClient:
+    return DeepSeekClient()

@@ -10,7 +10,7 @@ from fastapi import HTTPException, UploadFile
 from pydantic import BaseModel
 
 from app.config import get_settings
-from app.llm.deepseek_client import DeepSeekClient
+from app.llm.deepseek_client import get_client
 from app.mcp.runner import MCPRunner
 from app.ledger.asr_extract import (
     build_combined_texts_from_asr,
@@ -54,7 +54,7 @@ async def llm_extract_many(texts: list[str]) -> list[Dict[str, str]]:
     if not texts:
         return []
     try:
-        client = DeepSeekClient()
+        client = get_client()
     except Exception:
         return []
     user_parts: List[str] = []
