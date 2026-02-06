@@ -1,20 +1,22 @@
-import json
-import sys
-import subprocess
-import importlib.util
+import os
+import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from dotenv import load_dotenv
+from groq import Groq
+import httpx
 from loguru import logger
 from mcp.server.fastmcp import FastMCP
+
+import base64
+import requests
 
 mcp = FastMCP("ledger")
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-OCR_SCRIPT = BASE_DIR / "skills" / "ocr-ledger" / "scripts" / "ocr_receipt.py"
-VOICE_SCRIPT = BASE_DIR / "skills" / "voice-ledger" / "scripts" / "transcribe_audio.py"
 LEDGER_CSV = BASE_DIR / "data" / "ledger.csv"
 
 LEDGER_FIELDS = [
@@ -31,37 +33,137 @@ LEDGER_FIELDS = [
 ]
 
 REQUIRED_FIELDS = {"date", "merchant", "amount"}
-_OCR_MODULE = None
+AMOUNT_RE = re.compile(r"(?<!\d)(\d{1,3}(?:,?\d{3})*(?:\.\d{1,2})?)(?!\d)")
+DATE_RE = re.compile(r"(20\d{2}[/-]\d{1,2}[/-]\d{1,2})")
+DATE_CN_RE = re.compile(r"(20\d{2})年(\d{1,2})月(\d{1,2})日")
+
+CURRENCY_HINTS = {
+    "美元": "USD",
+    "美金": "USD",
+    "人民币": "CNY",
+    "块": "CNY",
+    "元": "CNY",
+}
+
+_GROQ_HTTP_CLIENT: Optional[httpx.Client] = None
 
 
-def _load_ocr_module():
-    global _OCR_MODULE
-    if _OCR_MODULE is not None:
-        return _OCR_MODULE
-    spec = importlib.util.spec_from_file_location("ocr_receipt", OCR_SCRIPT)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Failed to load OCR module from {OCR_SCRIPT}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    _OCR_MODULE = module
-    return module
+def _get_env(name: str) -> str:
+    value = (os.getenv(name) or "").strip()
+    if not value:
+        raise RuntimeError(f"Missing required env var: {name}")
+    return value
 
 
-def _run_script_json(script_path: Path, args: list[str]) -> Dict[str, Any]:
-    if not script_path.exists():
-        raise FileNotFoundError(f"Script not found: {script_path}")
-    cmd = [sys.executable, str(script_path), *args]
-    logger.info("Running script: {}", " ".join(cmd))
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "Script failed")
-    output = result.stdout.strip()
-    if not output:
-        raise RuntimeError("Script returned empty output")
-    try:
-        return json.loads(output)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Invalid JSON from script: {exc}") from exc
+@lru_cache(maxsize=1)
+def _get_groq_client() -> Groq:
+    api_key = (os.getenv("GROQ_API_KEY") or "").strip()
+    if not api_key:
+        raise RuntimeError("Missing GROQ_API_KEY")
+    proxy_url = (os.getenv("GROQ_PROXY_URL") or "").strip()
+    if proxy_url:
+        global _GROQ_HTTP_CLIENT
+        if _GROQ_HTTP_CLIENT is None:
+            _GROQ_HTTP_CLIENT = httpx.Client(
+                proxies={
+                    "http://": proxy_url,
+                    "https://": proxy_url,
+                }
+            )
+        return Groq(api_key=api_key, http_client=_GROQ_HTTP_CLIENT)
+    return Groq(api_key=api_key)
+
+
+def _read_file_base64(path: Path) -> str:
+    data = path.read_bytes()
+    if not data:
+        raise RuntimeError("Image is empty.")
+    return base64.b64encode(data).decode("ascii")
+
+
+def _file_type(path: Path) -> int:
+    return 0 if path.suffix.lower() == ".pdf" else 1
+
+def _call_ocr_api(image_path: Path, lang: str) -> Dict[str, Any]:
+    api_url = _get_env("OCR_API_URL")
+    token = _get_env("OCR_API_TOKEN")
+    payload: Dict[str, Any] = {
+        "file": _read_file_base64(image_path),
+        "fileType": _file_type(image_path),
+        "useDocOrientationClassify": False,
+        "useDocUnwarping": False,
+        "useTextlineOrientation": False,
+    }
+    headers = {"Authorization": f"token {token}", "Content-Type": "application/json"}
+    resp = requests.post(api_url, json=payload, headers=headers, timeout=60)
+    if resp.status_code != 200:
+        raise RuntimeError(f"OCR API error {resp.status_code}: {resp.text}")
+    data = resp.json()
+    result = data.get("result") if isinstance(data, dict) else None
+    if not isinstance(result, dict):
+        raise RuntimeError("OCR API response missing result payload.")
+    return result
+
+
+def _extract_lines_from_api(result: Dict[str, Any]) -> list[Dict[str, Any]]:
+    lines: list[Dict[str, Any]] = []
+    ocr_results = result.get("ocrResults") or []
+    if isinstance(ocr_results, list):
+        for item in ocr_results:
+            if not isinstance(item, dict):
+                continue
+            pruned = item.get("prunedResult")
+            if not isinstance(pruned, dict):
+                continue
+            rec_texts = pruned.get("rec_texts")
+            rec_boxes = pruned.get("rec_boxes")
+            if not isinstance(rec_boxes, list):
+                rec_boxes = None
+            if not isinstance(rec_texts, list):
+                continue
+            for idx, raw in enumerate(rec_texts):
+                if not isinstance(raw, str):
+                    continue
+                text = raw.strip()
+                if text:
+                    entry = {"text": text, "score": None}
+                    if rec_boxes and idx < len(rec_boxes) and isinstance(rec_boxes[idx], list):
+                        entry["bbox"] = rec_boxes[idx]
+                    lines.append(entry)
+    return lines
+
+
+def _resolve_groq_model(model: str) -> str:
+    if model in ("whisper-large-v3", "whisper-large-v3-turbo"):
+        return model
+    if model in ("small", "base", "medium", "large"):
+        return "whisper-large-v3-turbo"
+    return os.getenv("GROQ_ASR_MODEL", "whisper-large-v3-turbo")
+
+
+def _extract_date(text: str) -> Optional[str]:
+    match = DATE_RE.search(text)
+    if match:
+        return match.group(1).replace("/", "-")
+    match_cn = DATE_CN_RE.search(text)
+    if match_cn:
+        year, month, day = match_cn.groups()
+        return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+    return None
+
+
+def _extract_amount(text: str) -> Optional[str]:
+    matches = AMOUNT_RE.findall(text)
+    if not matches:
+        return None
+    return matches[-1]
+
+
+def _extract_currency(text: str) -> Optional[str]:
+    for hint, currency in CURRENCY_HINTS.items():
+        if hint in text:
+            return currency
+    return None
 
 
 def _ensure_csv(path: Path) -> None:
@@ -104,30 +206,56 @@ def _basename(value: str) -> str:
 @mcp.tool()
 def ocr_receipt(image_path: str, lang: str = "ch") -> Dict[str, Any]:
     """Run PaddleOCR on a receipt image and return structured JSON."""
-    module = _load_ocr_module()
-    payload = module.run(Path(image_path), lang)
-    if not isinstance(payload, dict):
-        raise RuntimeError("OCR module returned unexpected payload.")
-    return payload
+    path = Path(image_path).expanduser().resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"Image not found: {path}")
+    result = _call_ocr_api(path, lang)
+    lines = _extract_lines_from_api(result)
+    raw_text = "\n".join(line["text"] for line in lines)
+    return {
+        "image_path": str(path),
+        "raw_text": raw_text,
+        "lines": lines,
+    }
 
 
 @mcp.tool()
 def transcribe_audio(audio_path: str, model: str = "small", device: str = "cpu") -> Dict[str, Any]:
-    """Transcribe WAV audio via faster-whisper and return structured JSON."""
-    payload = _run_script_json(
-        VOICE_SCRIPT,
-        [
-            "--audio",
-            audio_path,
-            "--model",
-            model,
-            "--device",
-            device,
-            "--output",
-            "-",
-        ],
-    )
-    return payload
+    """Transcribe audio via Groq Whisper and return structured JSON."""
+    client = _get_groq_client()
+    groq_model = _resolve_groq_model(model)
+    path = Path(audio_path).expanduser().resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"Audio not found: {path}")
+    with path.open("rb") as file:
+        transcription = client.audio.transcriptions.create(
+            file=(path.name, file.read()),
+            model=groq_model,
+            language="zh",
+            response_format="verbose_json",
+        )
+
+    if isinstance(transcription, dict):
+        raw_text = (transcription.get("text") or "").strip()
+        segment_list = transcription.get("segments") or []
+    else:
+        raw_text = (getattr(transcription, "text", "") or "").strip()
+        segment_list = getattr(transcription, "segments", []) or []
+
+    extracted = {
+        "date": _extract_date(raw_text),
+        "amount": _extract_amount(raw_text),
+        "currency": _extract_currency(raw_text),
+        "merchant": None,
+    }
+
+    return {
+        "audio_path": str(path),
+        "language": "zh",
+        "raw_text": raw_text,
+        "segments": segment_list,
+        "extracted": extracted,
+    }
 
 
 @mcp.tool()

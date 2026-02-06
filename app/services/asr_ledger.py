@@ -3,6 +3,9 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Dict, List, Optional
 
+from app.mcp.runner import MCPRunner
+from app.services.ocr_ledger import normalize_tool_output
+
 from app.services.ledger_extract import llm_extract_many
 from app.services.ocr_ledger import (
     PAYMENT_HINT_RE,
@@ -14,6 +17,24 @@ from app.services.ocr_ledger import (
 
 def _lines_from_text(text: str) -> List[str]:
     return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+async def parse_audio(
+    runner: MCPRunner,
+    audio_path: str,
+    model: str = "small",
+    device: str = "cpu",
+) -> Dict[str, Any]:
+    result = await runner.call_tool(
+        "ledger",
+        "transcribe_audio",
+        {"audio_path": audio_path, "model": model, "device": device},
+    )
+    if hasattr(result, "model_dump"):
+        raw_result = result.model_dump(mode="json", by_alias=True, exclude_none=True)
+    else:
+        raw_result = result
+    return normalize_tool_output(raw_result)
 
 
 async def build_payloads_from_asr(
@@ -47,8 +68,6 @@ async def build_payloads_from_asr(
             combined_text = "\n".join(date_context) + "\n" + combined_text
         if payment_context and not PAYMENT_HINT_RE.search(combined_text):
             combined_text = "\n".join(payment_context) + "\n" + combined_text
-        if text:
-            combined_text = f"{combined_text}\n{text}".strip()
         combined_texts.append(combined_text)
 
     llm_records = await llm_extract_many(combined_texts)

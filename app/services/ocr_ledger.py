@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from app.services.ledger_extract import extract_json, llm_extract_many
 from loguru import logger
+from app.mcp.runner import MCPRunner
 
 
 TIME_RE = re.compile(r"(上午|下午)?\d{1,2}:\d{2}")
@@ -50,6 +51,23 @@ def normalize_tool_output(result: Any) -> Dict[str, Any]:
             if isinstance(payload, dict) and payload:
                 return payload
     return result
+
+
+async def parse_image(
+    runner: MCPRunner,
+    image_path: str,
+    lang: str = "ch",
+) -> Dict[str, Any]:
+    result = await runner.call_tool(
+        "ledger",
+        "ocr_receipt",
+        {"image_path": image_path, "lang": lang},
+    )
+    if hasattr(result, "model_dump"):
+        raw_result = result.model_dump(mode="json", by_alias=True, exclude_none=True)
+    else:
+        raw_result = result
+    return normalize_tool_output(raw_result)
 
 
 def extract_lines(parse_result: Dict[str, Any]) -> List[str]:

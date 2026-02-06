@@ -1,4 +1,5 @@
 import os
+from functools import lru_cache
 from typing import Any, Dict, Optional
 
 from loguru import logger
@@ -10,6 +11,7 @@ mcp = FastMCP("tavily")
 load_dotenv()
 
 
+@lru_cache(maxsize=1)
 def _get_client() -> TavilyClient:
     """Create a Tavily client from environment config."""
     api_key = os.getenv("TAVILY_API_KEY")

@@ -6,7 +6,6 @@ from typing import Optional, List
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 class Settings(BaseSettings):
     """App configuration loaded from environment or .env."""
 
@@ -18,6 +17,7 @@ class Settings(BaseSettings):
     tavily_api_key: Optional[str] = Field(default=None, alias="TAVILY_API_KEY")
     groq_api_key: Optional[str] = Field(default=None, alias="GROQ_API_KEY")
     groq_asr_model: Optional[str] = Field(default=None, alias="GROQ_ASR_MODEL")
+    groq_proxy_url: Optional[str] = Field(default=None, alias="GROQ_PROXY_URL")
     ocr_api_url: Optional[str] = Field(default=None, alias="OCR_API_URL")
     ocr_api_token: Optional[str] = Field(default=None, alias="OCR_API_TOKEN")
     ocr_api_ip: Optional[str] = Field(default=None, alias="OCR_API_IP")
